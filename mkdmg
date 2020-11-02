@@ -1,0 +1,213 @@
+#!/usr/bin/env bash
+
+#                 DO WHAT THE FUCK YOU WANT TO PUBLIC LICENSE
+#                          Version 2, December 2004
+#
+# Copyright (C) 2019 J.W https://github.com/jakwings/bash-mkdmg
+#
+# Everyone is permitted to copy and distribute verbatim or modified copies of
+# this license document, and changing it is allowed as long as the name is
+# changed.
+#
+#                 DO WHAT THE FUCK YOU WANT TO PUBLIC LICENSE
+#       TERMS AND CONDITIONS FOR COPYING, DISTRIBUTION AND MODIFICATION
+#
+#  0. You just DO WHAT THE FUCK YOU WANT TO.
+
+# References:
+# * http://newosxbook.com/DMG.html
+# * https://en.wikipedia.org/wiki/.DS_Store
+# * https://wiki.mozilla.org/DS_Store_File_Format
+# * https://metacpan.org/pod/DSStoreFormat
+# * https://0day.work/parsing-the-ds_store-file-format/
+
+set -o errexit
+set -o nounset
+set -o pipefail
+shopt -s nocaseglob nocasematch
+shopt -s inherit_errexit 2>/dev/null || true
+if [ "${BASH_VERSINFO[0]}" -eq 4 ]; then
+  shopt -s globasciiranges
+fi
+
+function Help {
+  printf 'mkdmg version 1.0.0
+
+USAGE
+    mkdmg [OPTION]... <SRC_FILE|SRC_DIR> <DMG_FILE>
+
+    Create a read-only disk image for MacOS.
+    The image contains a single file or contents of a directory.
+    An application bundle will be recognized as a single file.
+
+OPTIONS
+    -h, --help        Show this manual.
+    --volname <name>  Set the name of the mounted volume.
+    --volicon <path>  Set the icon of the mounted volume.
+    --no-compression  Keep the image data uncompressed.
+'
+}
+
+function Abort {
+  printf '%s\n' "$*" >&2
+  exit 1
+}
+
+ARGS=()
+OPT_VOLNAME=
+OPT_VOLICON=
+OPT_FORMAT=
+
+function CheckArity {
+  local opt="$1" arity="$2" argc="$3"
+  if [ "${arity}" -lt "${argc}" ]; then
+    Abort "Missing argument for option: ${opt}"
+  fi
+}
+
+function ParseOption {
+  local opt="$1"
+  shift
+  case "${opt}" in
+    (--volname)
+      CheckArity "${opt}" 1 "$#"
+      OPT_VOLNAME="$1"
+      return 1
+      ;;
+    (--volicon)
+      CheckArity "${opt}" 1 "$#"
+      OPT_VOLICON="$1"
+      return 1
+      ;;
+    (--no-compression)
+      OPT_FORMAT=UDRO
+      return 0
+      ;;
+    (*) Abort "Unrecognized option: ${opt}"
+  esac
+}
+
+# looks like crap ?
+function ParseOptions {
+  local arg= argind=0
+  while [ "$#" -gt 0 ]; do
+    arg="$1"
+    argind="$(( argind + 1 ))"
+    shift
+    case "${arg}" in
+      (--) break ;;
+      (- | [!-]*) ARGS+=("${arg}") ;;
+      (--help | -[h?]* | -[!-]*[h?]* | -\?* | --\?* | --help=*) Help; exit 0 ;;
+      (--=* | --[!=]* | -[!-]*)  # excluding "-" and "--"
+        local opt="${arg}" optarg= optind="${argind}" has_arg=
+        case "${opt}" in
+          (--*=*) opt="${opt%%=*}" optarg="${opt#*=}" has_arg=1 ;;
+          (--*) opt="${opt%%=*}" ;;
+          # DIY:
+          # * "-abc" => -[ a=bc | a b=c | a b c | abc | ab=c | a bc ]
+          # * optarg may starts with "-"
+          #(-*=*) opt="${opt%%=*}" optarg="${opt#*=}" ;;
+          #(*) opt=DIY ;;
+        esac
+        ParseOption "${opt}" ${has_arg:+"${optarg}"} ${1+"$1"} || shift "$?"
+        ;;
+      (*)
+        Abort "unrecognized argument at #${argind} : ${arg}"
+    esac
+  done
+  ARGS+=("$@")
+}
+
+function CleanUp {
+  if [ -n "${dst_dmg-}" ]; then
+    if [ -e "${dst_dmg}.sparseimage" ]; then
+      rm -v -- "${dst_dmg}.sparseimage"
+    fi
+    if [ -e "${dst_dmg}.sparsebundle" ]; then
+      rm -Rv -- "${dst_dmg}.sparsebundle"
+    fi
+    if [ -e "${dst_dmg}.cdr" ]; then
+      rm -v -- "${dst_dmg}.cdr"
+    fi
+    if [ -e "${dst_dmg}.mounted" ]; then
+      hdiutil detach "${dst_dmg}.mounted"
+    fi
+  fi
+}
+trap CleanUp EXIT
+
+function Run {
+  if [ -z "${ARGS[0]-}" ] || [ -z "${ARGS[1]-}" ]; then
+    Help >&2
+    exit 1
+  fi
+
+  if [ -n "${OPT_FORMAT}" ]; then
+    local format="${OPT_FORMAT}"
+    local dst_dmg="${ARGS[1]%.dmg}.dmg"
+  elif [[ "${ARGS[1]}" = *.iso ]]; then
+    local format=UDTO
+    local dst_dmg="${ARGS[1]%.iso}.iso"
+  else
+    local format=
+    local dst_dmg="${ARGS[1]%.dmg}.dmg"
+  fi
+  local src_dir="${ARGS[0]}"
+  local volname="${OPT_VOLNAME:-${dst_dmg%.*}}"
+  local volicon="${OPT_VOLICON}"
+
+  local flags=(
+    -fs HFSX -fsargs '-c c=64,a=16,e=16' -layout NONE -scrub
+  )
+
+  local available="$(/bin/df -P / | tail -n1 | awk '{print $4}')"
+  hdiutil create "${flags[@]}" -type SPARSE -size "${available}b" \
+                 -volname "${volname}" \
+                 "${dst_dmg}.sparseimage"
+
+  hdiutil attach -quiet -noverify -noautoopen \
+                 -mount required -mountpoint "${dst_dmg}.mounted" \
+                 "${dst_dmg}.sparseimage"
+
+  ditto --norsrc --noextattr --noacl --noqtn -- \
+        "${src_dir}" "${dst_dmg}.mounted/"
+
+  if [ -n "${volicon}" ]; then
+    cp -i -- "${volicon}" "${dst_dmg}.mounted/.VolumeIcon.icns"
+    touch -r "${volicon}" -- "${dst_dmg}.mounted/.VolumeIcon.icns"
+    SetFile -a C "${dst_dmg}.mounted"  # activate .VolumeIcon.icns
+  fi
+
+  hdiutil detach -quiet "${dst_dmg}.mounted"
+  while lsof "${dst_dmg}.sparseimage"; do sleep 1; done
+
+  if [ -e "${dst_dmg}" ]; then
+    read -p "Delete previous disk image \"${dst_dmg}\" ? [y/N] " -r answer
+    case "${answer}" in ([yY]*) rm -Rf -- "${dst_dmg}"; esac
+  fi
+  hdiutil convert "${dst_dmg}.sparseimage" \
+                  -format "${format:-UDZO}" \
+                  ${format:- -imagekey zlib-level=9} \
+                  -o "${dst_dmg}"
+
+  if [ "${format}" = UDTO ] && [ -e "${dst_dmg}.cdr" ]; then
+    mv "${dst_dmg}"{.cdr,}
+  #elif [ "${format}" = UDSP ] && [ -e "${dst_dmg}.sparseimage" ]; then
+  #  mv "${dst_dmg}"{.sparseimage,}
+  #elif [ "${format}" = UDSB ] && [ -e "${dst_dmg}.sparsebundle" ]; then
+  #  mv "${dst_dmg}"{.sparsebundle,}
+  fi
+  rm -- "${dst_dmg}.sparseimage"
+}
+
+cpal() (
+  local src="$1" dst="$2"
+  # strip path for cpio
+  cd -L -- "$(dirname -- "${src}")"
+  # same as "cp -al src dst/"
+  /usr/bin/find -f "$(basename -- "${src}")" -- -print0 \
+    | /usr/bin/cpio -0 --quiet -plmud "${dst}/"
+)
+
+ParseOptions "$@"
+Run
