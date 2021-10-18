@@ -1,16 +1,8 @@
-#!/usr/bin/env bash
+#!/bin/sh
 
-#                 DO WHAT THE FUCK YOU WANT TO PUBLIC LICENSE
-#                          Version 2, December 2004
+# Copyright (C) 2019 Jak.W https://github.com/jakwings/mkdmg
 #
-# Copyright (C) 2019 J.W https://github.com/jakwings/bash-mkdmg
-#
-# Everyone is permitted to copy and distribute verbatim or modified copies of
-# this license document, and changing it is allowed as long as the name is
-# changed.
-#
-#                 DO WHAT THE FUCK YOU WANT TO PUBLIC LICENSE
-#       TERMS AND CONDITIONS FOR COPYING, DISTRIBUTION AND MODIFICATION
+#   TERMS AND CONDITIONS FOR COPYING, DISTRIBUTION AND MODIFICATION
 #
 #  0. You just DO WHAT THE FUCK YOU WANT TO.
 
@@ -21,24 +13,17 @@
 # * https://metacpan.org/pod/DSStoreFormat
 # * https://0day.work/parsing-the-ds_store-file-format/
 
-set -o errexit
-set -o nounset
-set -o pipefail
-shopt -s nocaseglob nocasematch
-shopt -s inherit_errexit 2>/dev/null || true
-if [ "${BASH_VERSINFO[0]}" -eq 4 ]; then
-  shopt -s globasciiranges
-fi
+set -euf
 
-function Help {
-  printf 'mkdmg version 1.0.0
+help() {
+  printf '%s' 'mkdmg version 1.0.1
 
 USAGE
-    mkdmg [OPTION]... <SRC_FILE|SRC_DIR> <DMG_FILE>
+    mkdmg [options] <source> <output.dmg>
 
     Create a read-only disk image for MacOS.
-    The image contains a single file or contents of a directory.
-    An application bundle will be recognized as a single file.
+    The source *.{app,bundle,dictionary} is treated as a file.
+    The dmg file stores all contents of a directory or a file.
 
 OPTIONS
     -h, --help        Show this manual.
@@ -48,166 +33,175 @@ OPTIONS
 '
 }
 
-function Abort {
-  printf '%s\n' "$*" >&2
+echo() {
+  printf '%s\n' "$*"
+}
+ekho() {
+  printf '[Error] %s\n' "$*"
+}
+die() {
+  if [ 0 -lt "$#" ]; then ekho "$*" >&2; fi
   exit 1
 }
 
-ARGS=()
-OPT_VOLNAME=
-OPT_VOLICON=
-OPT_FORMAT=
+case_in() {
+  eval "! case \"\$1\" in (${2:-\"\"}) false; esac"
+}
 
-function CheckArity {
-  local opt="$1" arity="$2" argc="$3"
-  if [ "${arity}" -lt "${argc}" ]; then
-    Abort "Missing argument for option: ${opt}"
+cleanup() {
+  if [ '' != "${conf_dst-}" ]; then
+    rm -v -f -- "${conf_dst}.sparseimage"
+    if [ -e "${conf_dst}.mounted" ]; then
+      hdiutil detach "${conf_dst}.mounted"
+    fi
   fi
 }
+trap cleanup EXIT
 
-function ParseOption {
-  local opt="$1"
-  shift
-  case "${opt}" in
-    (--volname)
-      CheckArity "${opt}" 1 "$#"
-      OPT_VOLNAME="$1"
-      return 1
-      ;;
-    (--volicon)
-      CheckArity "${opt}" 1 "$#"
-      OPT_VOLICON="$1"
-      return 1
-      ;;
-    (--no-compression)
-      OPT_FORMAT=UDRO
-      return 0
-      ;;
-    (*) Abort "Unrecognized option: ${opt}"
-  esac
-}
+#main() (
+  # parse arguments
+  {
+    unset -v conf_src conf_dst conf_fmt conf_name conf_icon
+    arg_n=0 arg='' argind=0
+    while [ 0 -lt "$#" ]; do
+      arg="$1"; shift
+      argind="$(( argind + 1 ))"
+      case "${arg}" in
+        (--help|-h|-help|-\?) help; exit 0 ;;
+        (--)
+          while [ 0 -lt "$#" ]; do
+            eval "arg_$(( arg_n += 1 ))=\"\$1\""; shift
+          done
+          ;;
+        (-|[!-]*)
+          eval "arg_$(( arg_n += 1 ))=\"\${arg}\""
+          ;;
+        (--volname=*)
+          conf_name="${arg#*=}"
+          ;;
+        (--volname)
+          if [ 0 -lt "$#" ]; then
+            conf_name="$1"; shift
+          else
+            die "missing value for option \"${arg}\""
+          fi
+          ;;
+        (--volicon=*)
+          conf_icon="${arg#*=}"
+          ;;
+        (--volicon)
+          if [ 0 -lt "$#" ]; then
+            conf_icon="$1"; shift
+          else
+            die "missing value for option \"${arg}\""
+          fi
+          ;;
+        (--no-compression)
+          conf_fmt=UDRO
+          ;;
+        (*) die "unrecognized argument#${argind}: \"${arg}\""
+      esac
+    done
 
-# looks like crap ?
-function ParseOptions {
-  local arg= argind=0
-  while [ "$#" -gt 0 ]; do
-    arg="$1"
-    argind="$(( argind + 1 ))"
-    shift
-    case "${arg}" in
-      (--) break ;;
-      (- | [!-]*) ARGS+=("${arg}") ;;
-      (--help | -[h?]* | -[!-]*[h?]* | -\?* | --\?* | --help=*) Help; exit 0 ;;
-      (--=* | --[!=]* | -[!-]*)  # excluding "-" and "--"
-        local opt="${arg}" optarg= optind="${argind}" has_arg=
-        case "${opt}" in
-          (--*=*) opt="${opt%%=*}" optarg="${opt#*=}" has_arg=1 ;;
-          (--*) opt="${opt%%=*}" ;;
-          # DIY:
-          # * "-abc" => -[ a=bc | a b=c | a b c | abc | ab=c | a bc ]
-          # * optarg may starts with "-"
-          #(-*=*) opt="${opt%%=*}" optarg="${opt#*=}" ;;
-          #(*) opt=DIY ;;
-        esac
-        ParseOption "${opt}" ${has_arg:+"${optarg}"} ${1+"$1"} || shift "$?"
-        ;;
-      (*)
-        Abort "unrecognized argument at #${argind} : ${arg}"
+    conf_src="${arg_1-}"
+    conf_dst="${arg_2-}"
+
+    if [ '' = "${conf_src-}${conf_dst-}" ]; then
+      {
+        help
+        echo ''
+        die 'missing source or destination'
+      } >&2
+    elif ! [ -e "${conf_src-}" ]; then
+      die "invalid source \"${conf_src-}\""
+    elif [ x- = x"${conf_src}" ]; then
+      die "filename of source was a single dash \"${conf_src-}\""
+    elif [ '' = "${conf_dst-}" ]; then
+      die "empty dmg filename \"${conf_dst-}\""
+    elif case_in "${conf_dst}" '*/'; then
+      die "dmg filename ended with a slash \"/\""
+    elif [ '' != "${conf_icon-}" ] && ! [ -e "${conf_icon}" ]; then
+      die "invalid icon \"${conf_icon}\""
+    fi
+
+    case "${conf_dst}" in
+      (*.dmg|*.DMG) : ;;
+      (*.[Dd][Mm][Gg]) conf_dst="${conf_dst%????}.dmg" ;;
+      (*) conf_dst="${conf_dst}.dmg"
     esac
-  done
-  ARGS+=("$@")
-}
 
-function CleanUp {
-  if [ -n "${dst_dmg-}" ]; then
-    if [ -e "${dst_dmg}.sparseimage" ]; then
-      rm -v -- "${dst_dmg}.sparseimage"
+    conf_fmt="${conf_fmt:-UDZO}"
+    conf_name="${conf_name:-"${conf_dst##*/}"}"
+    conf_name="${conf_name%.*}"
+    conf_icon="${conf_icon:-}"
+
+    # hdiutil, SetFile -- sucks --
+    if ! case_in "${conf_src}" '/*'; then conf_src="./${conf_src}"; fi
+    if ! case_in "${conf_dst}" '/*'; then conf_dst="./${conf_dst}"; fi
+  }
+
+  # create dmg
+  {
+    if [ -e "${conf_dst}" ]; then
+      printf '%s' "Delete previous dmg file \"${conf_dst}\" ? [y/N] " >&2
+      if IFS= read -r reply && case_in "${reply}" '[yY]*'; then
+        rm -f -R -- "${conf_dst}"
+      else
+        echo 'Get back to me when you are ready.'
+        echo 'Bye.'
+        exit 0
+      fi
     fi
-    if [ -e "${dst_dmg}.sparsebundle" ]; then
-      rm -Rv -- "${dst_dmg}.sparsebundle"
+
+    dir="$(dirname -- "${conf_dst}")"
+    available="$(/bin/df -P -- "${dir}" | tail -n1 | awk '{print $4}')"
+    hdiutil create -fs HFSX -fsargs '-c c=64,a=16,e=16' -layout NONE -scrub \
+                   -uid 99 -gid 99 -mode 0755 \
+                   -type SPARSE -size "${available}b" \
+                   -volname "${conf_name}" \
+                   "${conf_dst}.sparseimage"
+
+    hdiutil attach -quiet -noverify -noautoopen \
+                   -mount required -mountpoint "${conf_dst}.mounted" \
+                   "${conf_dst}.sparseimage"
+
+    ditto_flags='--norsrc --noextattr --noacl --noqtn'
+    if [ -d "${conf_src}" ] && \
+      case "$(basename -- "${conf_src}")" in
+        (*.[Aa][Pp][Pp]) true ;;
+        (*.[Bb][Uu][Nn][Dd][Ll][Ee]) true ;;
+        (*.[Dd][Ii][Cc][Tt][Ii][Oo][Nn][Aa][Rr][Yy]) true ;;
+        (*) false
+      esac
+    then
+      ditto $ditto_flags --keepParent -c -- "${conf_src}" - \
+        | ditto $ditto_flags -x -- - "${conf_dst}.mounted/"
+    else
+      ditto $ditto_flags -- "${conf_src}" "${conf_dst}.mounted/"
     fi
-    if [ -e "${dst_dmg}.cdr" ]; then
-      rm -v -- "${dst_dmg}.cdr"
+
+    if [ '' != "${conf_icon}" ]; then
+      if [ -e "${conf_dst}.mounted/.VolumeIcon.icns" ]; then
+        rm -f -R -- "${conf_dst}.mounted/.VolumeIcon.icns"
+      fi
+      /bin/cp -X -- "${conf_icon}" "${conf_dst}.mounted/.VolumeIcon.icns"
+      touch -r "${conf_icon}" -- "${conf_dst}.mounted/.VolumeIcon.icns"
+      SetFile -a C "${conf_dst}.mounted"  # activate .VolumeIcon.icns
     fi
-    if [ -e "${dst_dmg}.mounted" ]; then
-      hdiutil detach "${dst_dmg}.mounted"
+
+    hdiutil detach -quiet "${conf_dst}.mounted"
+    while lsof -- "${conf_dst}.sparseimage"; do sleep 1; done
+
+    # avoid leaking your $available disk size
+    hdiutil resize -sectors min "${conf_dst}.sparseimage"
+
+    format_flags=
+    if [ UDZO = "${conf_fmt}" ]; then
+      format_flags='-imagekey zlib-level=9'
     fi
-  fi
-}
-trap CleanUp EXIT
+    hdiutil convert -format "${conf_fmt}" $format_flags \
+                    -o "${conf_dst}" "${conf_dst}.sparseimage"
 
-function Run {
-  if [ -z "${ARGS[0]-}" ] || [ -z "${ARGS[1]-}" ]; then
-    Help >&2
-    exit 1
-  fi
-
-  if [ -n "${OPT_FORMAT}" ]; then
-    local format="${OPT_FORMAT}"
-    local dst_dmg="${ARGS[1]%.dmg}.dmg"
-  elif [[ "${ARGS[1]}" = *.iso ]]; then
-    local format=UDTO
-    local dst_dmg="${ARGS[1]%.iso}.iso"
-  else
-    local format=
-    local dst_dmg="${ARGS[1]%.dmg}.dmg"
-  fi
-  local src_dir="${ARGS[0]}"
-  local volname="${OPT_VOLNAME:-${dst_dmg%.*}}"
-  local volicon="${OPT_VOLICON}"
-
-  local flags=(
-    -fs HFSX -fsargs '-c c=64,a=16,e=16' -layout NONE -scrub
-  )
-
-  local available="$(/bin/df -P / | tail -n1 | awk '{print $4}')"
-  hdiutil create "${flags[@]}" -type SPARSE -size "${available}b" \
-                 -volname "${volname}" \
-                 "${dst_dmg}.sparseimage"
-
-  hdiutil attach -quiet -noverify -noautoopen \
-                 -mount required -mountpoint "${dst_dmg}.mounted" \
-                 "${dst_dmg}.sparseimage"
-
-  ditto --norsrc --noextattr --noacl --noqtn -- \
-        "${src_dir}" "${dst_dmg}.mounted/"
-
-  if [ -n "${volicon}" ]; then
-    cp -i -- "${volicon}" "${dst_dmg}.mounted/.VolumeIcon.icns"
-    touch -r "${volicon}" -- "${dst_dmg}.mounted/.VolumeIcon.icns"
-    SetFile -a C "${dst_dmg}.mounted"  # activate .VolumeIcon.icns
-  fi
-
-  hdiutil detach -quiet "${dst_dmg}.mounted"
-  while lsof "${dst_dmg}.sparseimage"; do sleep 1; done
-
-  if [ -e "${dst_dmg}" ]; then
-    read -p "Delete previous disk image \"${dst_dmg}\" ? [y/N] " -r answer
-    case "${answer}" in ([yY]*) rm -Rf -- "${dst_dmg}"; esac
-  fi
-  hdiutil convert "${dst_dmg}.sparseimage" \
-                  -format "${format:-UDZO}" \
-                  ${format:- -imagekey zlib-level=9} \
-                  -o "${dst_dmg}"
-
-  if [ "${format}" = UDTO ] && [ -e "${dst_dmg}.cdr" ]; then
-    mv "${dst_dmg}"{.cdr,}
-  #elif [ "${format}" = UDSP ] && [ -e "${dst_dmg}.sparseimage" ]; then
-  #  mv "${dst_dmg}"{.sparseimage,}
-  #elif [ "${format}" = UDSB ] && [ -e "${dst_dmg}.sparsebundle" ]; then
-  #  mv "${dst_dmg}"{.sparsebundle,}
-  fi
-  rm -- "${dst_dmg}.sparseimage"
-}
-
-cpal() (
-  local src="$1" dst="$2"
-  # strip path for cpio
-  cd -L -- "$(dirname -- "${src}")"
-  # same as "cp -al src dst/"
-  /usr/bin/find -f "$(basename -- "${src}")" -- -print0 \
-    | /usr/bin/cpio -0 --quiet -plmud "${dst}/"
-)
-
-ParseOptions "$@"
-Run
+    rm -- "${conf_dst}.sparseimage"
+  } >&2
+#)

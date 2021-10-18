@@ -1,11 +1,11 @@
-mkdmg version 1.0.0
+mkdmg version 1.0.1
 
 USAGE
-    mkdmg [OPTION]... <SRC_FILE|SRC_DIR> <DMG_FILE>
+    mkdmg [options] <source> <output.dmg>
 
     Create a read-only disk image for MacOS.
-    The image contains a single file or contents of a directory.
-    An application bundle will be recognized as a single file.
+    The source *.{app,bundle,dictionary} is treated as a file.
+    The dmg file stores all contents of a directory or a file.
 
 OPTIONS
     -h, --help        Show this manual.
@@ -14,4 +14,4 @@ OPTIONS
     --no-compression  Keep the image data uncompressed.
 
 NOTE
-    THIS PROGRAM ONLY WORK ON MAC OS.
+    THIS PROGRAM ONLY WORKS ON MAC OS.
