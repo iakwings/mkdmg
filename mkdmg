@@ -16,7 +16,7 @@
 set -euf
 
 help() {
-  printf '%s' 'mkdmg version 1.0.1
+  printf '%s' 'mkdmg version 1.0.2
 
 USAGE
     mkdmg [options] <source> <output.dmg>
@@ -67,14 +67,9 @@ trap cleanup EXIT
       arg="$1"; shift
       argind="$(( argind + 1 ))"
       case "${arg}" in
-        (--help|-h|-help|-\?) help; exit 0 ;;
-        (--)
-          while [ 0 -lt "$#" ]; do
-            eval "arg_$(( arg_n += 1 ))=\"\$1\""; shift
-          done
-          ;;
-        (-|[!-]*)
-          eval "arg_$(( arg_n += 1 ))=\"\${arg}\""
+        (--help|-h|-help|-\?)
+          help
+          exit 0
           ;;
         (--volname=*)
           conf_name="${arg#*=}"
@@ -99,14 +94,23 @@ trap cleanup EXIT
         (--no-compression)
           conf_fmt=UDRO
           ;;
-        (*) die "unrecognized argument#${argind}: \"${arg}\""
+        (--)
+          while [ 0 -lt "$#" ]; do
+            eval "arg_$(( arg_n += 1 ))=\"\$1\""; shift
+          done
+          ;;
+        (-?*)
+          die "unrecognized option at #${argind}: \"${arg}\""
+          ;;
+        (*)
+          eval "arg_$(( arg_n += 1 ))=\"\${arg}\""
       esac
     done
 
     conf_src="${arg_1-}"
     conf_dst="${arg_2-}"
 
-    if [ '' = "${conf_src-}${conf_dst-}" ]; then
+    if [ xx != "${arg_1+x}${arg_2+x}" ]; then
       {
         help
         echo ''
@@ -114,8 +118,6 @@ trap cleanup EXIT
       } >&2
     elif ! [ -e "${conf_src-}" ]; then
       die "invalid source \"${conf_src-}\""
-    elif [ x- = x"${conf_src}" ]; then
-      die "filename of source was a single dash \"${conf_src-}\""
     elif [ '' = "${conf_dst-}" ]; then
       die "empty dmg filename \"${conf_dst-}\""
     elif case_in "${conf_dst}" '*/'; then
@@ -135,7 +137,7 @@ trap cleanup EXIT
     conf_name="${conf_name%.*}"
     conf_icon="${conf_icon:-}"
 
-    # hdiutil, SetFile -- sucks --
+    # hdiutil, SetFile, ditto -- sucks --
     if ! case_in "${conf_src}" '/*'; then conf_src="./${conf_src}"; fi
     if ! case_in "${conf_dst}" '/*'; then conf_dst="./${conf_dst}"; fi
   }
