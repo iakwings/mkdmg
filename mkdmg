@@ -138,10 +138,10 @@ trap cleanup EXIT
     conf_icon="${conf_icon:-}"
 
     # hdiutil, SetFile, ditto -- sucks --
-    if ! case_in "${conf_src}" '.|..|/*|./*|../*'; then
+    if ! case_in "${conf_src}" '.|..|/*|./*|../*|""'; then
       conf_src="./${conf_src}"
     fi
-    if ! case_in "${conf_dst}" '.|..|/*|./*|../*'; then
+    if ! case_in "${conf_dst}" '.|..|/*|./*|../*|""'; then
       conf_dst="./${conf_dst}"
     fi
   }
