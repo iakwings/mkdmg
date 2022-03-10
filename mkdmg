@@ -13,10 +13,10 @@
 # * https://metacpan.org/pod/DSStoreFormat
 # * https://0day.work/parsing-the-ds_store-file-format/
 
-set -euf
+set -euf; unset -v IFS; export LC_ALL=C
 
 help() {
-  printf '%s' 'mkdmg version 1.1.0
+  printf '%s' 'mkdmg version 1.1.1
 
 USAGE
     mkdmg [options] <source> <output.dmg>
@@ -48,15 +48,19 @@ case_in() {
   eval "! case \"\$1\" in (${2:-\"\"}) false; esac"
 }
 
-cleanup() {
+on_exit() {
+  exitcode="$?"
   if [ '' != "${conf_dst-}" ]; then
     rm -v -f -- "${conf_dst}.sparseimage"
     if [ -e "${conf_dst}.mounted" ]; then
       hdiutil detach "${conf_dst}.mounted"
     fi
   fi
+  if [ 0 -ne "${exitcode}" ]; then
+    die 'mkdmg exited abnormally'
+  fi
 }
-trap cleanup EXIT
+trap on_exit EXIT
 
 #main() (
   # parse arguments
@@ -150,7 +154,7 @@ trap cleanup EXIT
   {
     if [ -e "${conf_dst}" ]; then
       printf '%s' "Delete previous dmg file \"${conf_dst}\" ? [y/N] " >&2
-      if IFS= read -r reply && case_in "${reply}" '[yY]*'; then
+      if IFS='' read -r reply && case_in "${reply}" '[yY]*'; then
         rm -f -R -- "${conf_dst}"
       else
         echo 'Get back to me when you are ready.'
@@ -201,7 +205,7 @@ trap cleanup EXIT
     # avoid leaking your $available disk size
     hdiutil resize -sectors min "${conf_dst}.sparseimage"
 
-    format_flags=
+    format_flags=''
     if [ UDZO = "${conf_fmt}" ]; then
       format_flags='-imagekey zlib-level=9'
     fi
