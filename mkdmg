@@ -16,7 +16,7 @@
 set -euf; unset -v IFS; export LC_ALL=C
 
 help() {
-  printf '%s' 'mkdmg version 1.1.1
+  printf '%s' 'mkdmg version 1.1.2
 
 USAGE
     mkdmg [options] <source> <output.dmg>
@@ -135,10 +135,12 @@ trap on_exit EXIT
       (*.[Dd][Mm][Gg]) conf_dst="${conf_dst%????}.dmg" ;;
       (*) conf_dst="${conf_dst}.dmg"
     esac
+    if [ '' = "${conf_name-}" ]; then
+      conf_name="${conf_dst##*/}"
+      conf_name="${conf_name%.dmg}"
+    fi
 
     conf_fmt="${conf_fmt:-UDZO}"
-    conf_name="${conf_name:-"${conf_dst##*/}"}"
-    conf_name="${conf_name%.*}"
     conf_icon="${conf_icon:-}"
 
     # hdiutil, SetFile, ditto -- sucks --
