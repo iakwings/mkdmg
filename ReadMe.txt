@@ -1,11 +1,13 @@
-mkdmg version 1.1.3
+mkdmg version 1.2.0
 
 USAGE
     mkdmg [options] <source> <output.dmg>
 
     Create a read-only disk image for MacOS.
-    The source *.{app,bundle,dictionary} is treated as a file.
     The dmg file stores all contents of a directory or a file.
+
+    Some sources are treated as files:
+      [!.]*.{app,bundle,dictionary,framework,kext,plugin}
 
 OPTIONS
     -h, --help        Show this manual.
