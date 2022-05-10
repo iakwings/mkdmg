@@ -16,7 +16,7 @@
 set -euf; unset -v IFS; export LC_ALL=C
 
 help() {
-  printf '%s' 'mkdmg version 1.2.0
+  printf '%s' 'mkdmg version 1.2.1
 
 USAGE
     mkdmg [options] <source> <output.dmg>
@@ -75,7 +75,7 @@ trap on_exit EXIT
       case "${arg}" in
         (--help|-h|-help|-\?)
           help
-          exit 0
+          exit
           ;;
         (--volname=*)
           conf_name="${arg#*=}"
@@ -164,7 +164,7 @@ trap on_exit EXIT
       else
         echo 'Get back to me when you are ready.'
         echo 'Bye.'
-        exit 0
+        die
       fi
     fi
 
