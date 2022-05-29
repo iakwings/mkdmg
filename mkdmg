@@ -16,7 +16,7 @@
 set -euf; unset -v IFS; export LC_ALL=C
 
 help() {
-  printf '%s' 'mkdmg version 1.2.1
+  printf '%s' 'mkdmg version 1.3.0
 
 USAGE
     mkdmg [options] <source> <output.dmg>
@@ -39,7 +39,7 @@ echo() {
   printf '%s\n' "$*"
 }
 ekho() {
-  printf '[Error] %s\n' "$*"
+  printf '[ERROR] %s\n' "$*"
 }
 die() {
   if [ 0 -lt "$#" ]; then ekho "$*" >&2; fi
@@ -129,7 +129,14 @@ trap on_exit EXIT
     elif case_in "${conf_dst}" '*/'; then
       die "dmg filename ended with a slash \"/\""
     elif [ '' != "${conf_icon-}" ] && ! [ -e "${conf_icon}" ]; then
-      die "invalid icon \"${conf_icon}\""
+      die "icon not found: \"${conf_icon}\""
+    else
+      mime="$(file --mime-type -- "${conf_icon}")"
+      case "${mime##*[:[:space:]]}" in
+        (image/x-icns) true ;;
+        # NOTE: invalid icon renders the disk icon transparent
+        (*) ekho "icon not in ICNS format: \"${conf_icon}\"" >&2
+      esac
     fi
 
     case "${conf_dst}" in
