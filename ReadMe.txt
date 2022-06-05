@@ -1,4 +1,4 @@
-mkdmg version 1.3.0
+mkdmg version 1.3.1
 
 USAGE
     mkdmg [options] <source> <output.dmg>
