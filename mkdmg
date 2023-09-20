@@ -16,7 +16,7 @@
 set -euf; unset -v IFS; export LC_ALL=C
 
 help() {
-  printf '%s' 'mkdmg version 1.3.1
+  printf '%s' 'mkdmg version 2.0.0
 
 USAGE
     mkdmg [options] <source> <output.dmg>
@@ -179,9 +179,9 @@ trap on_exit EXIT
 
     dir="$(dirname -- "${conf_dst}")"
     available="$(/bin/df -P -- "${dir}" | tail -n1 | awk '{print $4}')"
-    hdiutil create -fs HFSX -fsargs '-c c=64,a=16,e=16' -layout NONE -scrub \
+    hdiutil create -fs HFSX -fsargs '-c c=64,a=16,e=16' -layout NONE \
                    -uid 99 -gid 99 -mode 0755 \
-                   -type SPARSE -size "${available}b" \
+                   -type SPARSE -size "${available}b" -nospotlight \
                    -volname "${conf_name}" \
                    "${conf_dst}.sparseimage"
 
